@@ -29,7 +29,9 @@ class TrajFollower(Node):
         self.pose_y = 0.0
         self.theta_rob = 0.0
 
-        self.waypoints = [[0.0, 0.0], [5.5, 5.5]]
+        self.waypoints = [[0.0, 0.0], [0.5, 0.0], [0.6, -0.3], [-1.5, -0.5]]
+        self.prev_waypoint = 0
+        self.next_waypoint = 1
 
         """Messages"""
         self.speed = Twist()
@@ -88,12 +90,12 @@ class TrajFollower(Node):
 
     def calculate_error(self):
         #Vector of waypoints
-        vx = self.waypoints[1][0] - self.waypoints[0][0]
-        vy = self.waypoints[1][1] - self.waypoints[0][1]
+        vx = self.waypoints[self.next_waypoint][0] - self.waypoints[self.prev_waypoint][0]
+        vy = self.waypoints[self.next_waypoint][1] - self.waypoints[self.prev_waypoint][1]
 
         #Vector to be projected
-        ux = self.pose_x - self.waypoints[0][0]
-        uy = self.pose_y - self.waypoints[0][1]
+        ux = self.pose_x - self.waypoints[self.prev_waypoint][0]
+        uy = self.pose_y - self.waypoints[self.prev_waypoint][1]
 
         #Projection calculation
         v_mode = vx**2 + vy**2
@@ -112,17 +114,21 @@ class TrajFollower(Node):
         sign = vx*uy - vy*ux
 
         return -error*np.sign(sign)
-
+    
+    def calculate_distance_next_point(self):
+        dx = self.waypoints[self.next_waypoint][0] - self.pose_x
+        dy = self.waypoints[self.next_waypoint][1] - self.pose_y
+        return np.sqrt(dx**2 + dy**2)
 
 
     def speed_timer_cb(self):
         self.error = self.calculate_error()
 
-        print("Error: ", self.error)
+        print("x: ", self.pose_x, "   y: ", self.pose_y)
         
         # Path direction
-        vx = self.waypoints[1][0] - self.waypoints[0][0]
-        vy = self.waypoints[1][1] - self.waypoints[0][1]
+        vx = self.waypoints[self.next_waypoint][0] - self.waypoints[self.prev_waypoint][0]
+        vy = self.waypoints[self.next_waypoint][1] - self.waypoints[self.prev_waypoint][1]
         desired_theta = np.arctan2(vy, vx)
 
         # Heading error
@@ -142,6 +148,19 @@ class TrajFollower(Node):
         # Clippeo de v_ang (en prueba)
         self.speed.angular.z = np.clip(self.speed.angular.z, -1.5, 1.5)
         self.speed.linear.x = self.v_lin
+
+        distance = self.calculate_distance_next_point()
+
+        if distance <= 0.15:
+            print("Waypoint reached!")
+            self.next_waypoint += 1
+            self.prev_waypoint += 1
+
+            if self.next_waypoint >= len(self.waypoints):
+                self.speed.angular.z = 0.0
+                self.speed.linear.x = 0.0
+                self.prev_waypoint = len(self.waypoints)-2
+                self.next_waypoint = len(self.waypoints)-1
 
         self.robot_speed.publish(self.speed)
         self.prev_error = self.error
