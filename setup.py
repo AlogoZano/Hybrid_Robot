@@ -24,7 +24,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'trajectory_controller = hybrid_robot.trajectory_controller:main'
+            'trajectory_controller = hybrid_robot.trajectory_controller:main',
+            'pub_occupancy = hybrid_robot.pub_occupancy:main'
         ],
     },
 )

@@ -3,7 +3,7 @@ from rclpy.node import Node
 import rclpy.time
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist, PointStamped, Pose2D, PoseStamped
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, Path
 import tf2_ros
 import transforms3d
 import numpy as np
@@ -16,6 +16,7 @@ class TrajFollower(Node):
         """Suscriptions"""
         self.laser = self.create_subscription(LaserScan, '/scan', self.lidar_callback, 10)
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.pos_cb, 10)
+        #self.path_sub = self.create_subscription(Path, '/rrt_path', self.path_cb, 10)
 
 
         """Publishers"""
