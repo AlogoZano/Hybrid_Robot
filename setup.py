@@ -25,7 +25,9 @@ setup(
     entry_points={
         'console_scripts': [
             'trajectory_controller = hybrid_robot.trajectory_controller:main',
-            'pub_occupancy = hybrid_robot.pub_occupancy:main'
+            'pub_occupancy = hybrid_robot.pub_occupancy:main',
+            'path_planner = hybrid_robot.path_planner:main'
+
         ],
     },
 )
