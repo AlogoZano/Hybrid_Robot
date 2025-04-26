@@ -16,7 +16,7 @@ class TrajFollower(Node):
         """Suscriptions"""
         self.laser = self.create_subscription(LaserScan, '/scan', self.lidar_callback, 10)
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.pos_cb, 10)
-        #self.path_sub = self.create_subscription(Path, '/rrt_path', self.path_cb, 10)
+        self.path_sub = self.create_subscription(Path, '/planned_path', self.path_cb, 10)
 
 
         """Publishers"""
@@ -24,18 +24,23 @@ class TrajFollower(Node):
 
         """Timers """
         self.speed_timer = self.create_timer(0.02, self.speed_timer_cb) 
+        self.speed_timer.cancel()
 
         """Variables"""
         self.pose_x = 0.0
         self.pose_y = 0.0
         self.theta_rob = 0.0
 
-        self.waypoints = [[0.0, 0.0], [0.5, 0.0], [0.6, -0.3], [-1.5, -0.5]]
+        #self.waypoints_test = [[-0.12999991655349774, -0.03999992474913583], [-0.12999991655349774, -0.08999992549419389], [-0.12999991655349774, -0.13999992623925195], [-0.12999991655349774, -0.18999992698431], [-0.12999991655349774, -0.23999992772936807], [-0.12999991655349774, -0.2899999284744261], [-0.12999991655349774, -0.3399999292194842], [-0.12999991655349774, -0.38999992996454225], [-0.12999991655349774, -0.4399999307096003], [-0.12999991655349774, -0.48999993145465837], [-0.12999991655349774, -0.5399999321997164], [-0.12999991655349774, -0.5899999329447745], [-0.12999991655349774, -0.6399999336898325], [-0.12999991655349774, -0.6899999344348906], [-0.12999991655349774, -0.7399999351799487], [-0.12999991655349774, -0.7899999359250067], [-0.12999991655349774, -0.8399999366700648], [-0.12999991655349774, -0.8899999374151228], [-0.12999991655349774, -0.9399999381601809], [-0.12999991655349774, -0.989999938905239], [-0.12999991655349774, -1.039999939650297], [-0.07999991580843968, -1.039999939650297], [-0.02999991506338162, -1.039999939650297], [0.02000008568167644, -1.039999939650297], [0.0700000864267345, -1.039999939650297], [0.12000008717179256, -1.039999939650297], [0.17000008791685062, -1.039999939650297], [0.22000008866190868, -1.039999939650297], [0.27000008940696674, -1.039999939650297], [0.3200000901520248, -1.039999939650297], [0.37000009089708286, -1.039999939650297], [0.4200000916421409, -1.039999939650297], [0.470000092387199, -1.039999939650297], [0.520000093132257, -1.039999939650297], [0.5700000938773151, -1.039999939650297], [0.6200000946223732, -1.039999939650297], [0.6700000953674312, -1.039999939650297], [0.7200000961124893, -1.039999939650297], [0.7700000968575473, -1.039999939650297], [0.8200000976026054, -1.039999939650297], [0.8700000983476635, -1.039999939650297], [0.9200000990927215, -1.039999939650297]]
+        self.waypoints = []
+        print(self.waypoints)
+
         self.prev_waypoint = 0
         self.next_waypoint = 1
 
         """Messages"""
         self.speed = Twist()
+        self.path = Path()
 
         #Lidar data#
         self.ranges = []
@@ -70,9 +75,24 @@ class TrajFollower(Node):
 
          q = [w, x, y, z]
 
-         _, _, self.theta_rob = transforms3d.euler.quat2euler(q)        
+         _, _, self.theta_rob = transforms3d.euler.quat2euler(q)     
 
-    
+    def path_cb(self, msg):
+        self.path.poses = msg.poses
+
+        if len(self.path.poses):
+            print("Received path!!")
+
+            for point in self.path.poses:
+                self.waypoints.append([point.pose.position.x, point.pose.position.y])
+                
+                self.speed_timer = self.create_timer(0.02, self.speed_timer_cb) 
+
+            print("ORIGINALES: ", self.waypoints)
+            self.waypoints = self.reduce_waypoints(self.waypoints, 30)
+            print("BONITOS: ", self.waypoints)
+            print("Of len: ", len(self.waypoints))
+                
     def lidar_callback(self, msg):
         self.Fx_rep = 0.0
         self.Fy_rep = 0.0
@@ -121,6 +141,30 @@ class TrajFollower(Node):
         dy = self.waypoints[self.next_waypoint][1] - self.pose_y
         return np.sqrt(dx**2 + dy**2)
 
+    #Tremenda funcion, escoge puntos solo en esquinas (aparte del de inicio y fin)
+    def reduce_waypoints(self, waypoints, angle_threshold_deg=20):
+        if len(waypoints) < 3:
+            return waypoints
+
+        def angle_between(p1, p2):
+            dx = p2[0] - p1[0]
+            dy = p2[1] - p1[1]
+            return np.arctan2(dy, dx)
+
+        reduced = [waypoints[0]]
+
+        for i in range(1, len(waypoints) - 1):
+            angle1 = angle_between(waypoints[i - 1], waypoints[i])
+            angle2 = angle_between(waypoints[i], waypoints[i + 1])
+            angle_diff = np.arctan2(np.sin(angle2 - angle1), np.cos(angle2 - angle1))   #Angulo entre waypoints
+            angle_deg = np.degrees(np.abs(angle_diff))
+
+            if angle_deg >= angle_threshold_deg: #Importante el threshold
+                reduced.append(waypoints[i])
+
+        reduced.append(waypoints[-1])
+        return reduced
+
 
     def speed_timer_cb(self):
         self.error = self.calculate_error()
@@ -147,11 +191,18 @@ class TrajFollower(Node):
         self.speed.angular.z = angular_corr + heading_error
 
         # Clippeo de v_ang (en prueba)
-        self.speed.angular.z = np.clip(self.speed.angular.z, -1.5, 1.5)
+        self.speed.angular.z = np.clip(self.speed.angular.z, -3.0, 3.0)
         self.speed.linear.x = self.v_lin
+
+        #No lineal si esta bien chueco
+        if abs(heading_error) > np.pi / 4:  
+            self.speed.linear.x = 0.0
+        else:
+            self.speed.linear.x = self.v_lin
 
         distance = self.calculate_distance_next_point()
 
+        #Aun no me convence esta distancia pero jala bien
         if distance <= 0.15:
             print("Waypoint reached!")
             self.next_waypoint += 1

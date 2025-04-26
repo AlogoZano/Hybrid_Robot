@@ -1,26 +1,58 @@
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid, Path
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 import numpy as np
 import heapq
+from scipy.ndimage import grey_dilation
 
 class AStarPlanner(Node):
     def __init__(self):
         super().__init__('a_star_planner')
         self.map_sub = self.create_subscription(OccupancyGrid, '/map', self.map_callback, 10)
+        self.initial_pose_sub = self.create_subscription(PoseWithCovarianceStamped, '/initialpose', self.initial_pose_cb, 10)
+        self.goal_pose_sub = self.create_subscription(PoseStamped, '/goal_pose', self.goal_pose_cb, 10)
+
         self.path_pub = self.create_publisher(Path, '/planned_path', 10)
 
         self.occupancy_grid = None
 
         # Puntos de prueba por ahora (DE MAPA, o sea en metros ps)
-        self.start_world = (0.0, 0.0)  
-        self.goal_world = (1.0, 1.0)   
+        # Ya no son de prueba wuuu
+        self.start_world = None
+        self.goal_world = None  
+
+    def initial_pose_cb(self, msg):
+        self.start_world = (
+            msg.pose.pose.position.x,
+            msg.pose.pose.position.y
+        )
+        self.get_logger().info(f"Start pose: {self.start_world}")
+
+        if self.start_world and self.goal_world and self.occupancy_grid: #Muy importante pa empezar a planear
+            self.plan_and_publish_path()
+
+    def goal_pose_cb(self, msg):
+        self.goal_world = (
+            msg.pose.position.x,
+            msg.pose.position.y
+        )
+        self.get_logger().info(f"Goal pose: {self.goal_world}")
+
+        if self.start_world and self.goal_world and self.occupancy_grid: #Muy importante pa empezar a planear
+            self.plan_and_publish_path()
+
 
     def map_callback(self, msg: OccupancyGrid):
-        self.get_logger().info("Received map")
+        self.get_logger().info("Recibo Mapa")
         self.occupancy_grid = msg
-        self.plan_and_publish_path()
+
+    def inflate_obstacles(self, grid, inflation_radius_cells):
+        structure = np.ones((2 * inflation_radius_cells + 1, 2 * inflation_radius_cells + 1))
+        inflated = grey_dilation(grid, footprint=structure)
+        
+        inflated[grid >= 50] = 100 #Cambiable pa que no choque, aunque el radio jala chido
+        return inflated
 
 ##################### A* ####################
 
@@ -30,7 +62,7 @@ class AStarPlanner(Node):
         return mx, my
 
     def map_to_world(self, mx, my, origin, resolution):
-        x = mx * resolution + origin[0]
+        x = mx * resolution + origin[0] #Regresar a mundo, el origen AFECTA MUCHO
         y = my * resolution + origin[1]
         return x, y
 
@@ -86,7 +118,8 @@ class AStarPlanner(Node):
         start = self.world_to_map(start_world[0], start_world[1], origin, resolution)
         goal = self.world_to_map(goal_world[0], goal_world[1], origin, resolution)
 
-        path_pixels = self.a_star(start, goal, grid, width, height)
+        inflated_grid = self.inflate_obstacles(grid, inflation_radius_cells=int(0.2 / resolution))
+        path_pixels = self.a_star(start, goal, inflated_grid, width, height)
         path_world = [self.map_to_world(x, y, origin, resolution) for x, y in path_pixels]
 
         poses = []
@@ -111,7 +144,9 @@ class AStarPlanner(Node):
         path_msg.poses = poses
 
         self.path_pub.publish(path_msg)
-        self.get_logger().info(f"Published path with {len(poses)} poses.")
+        self.start_world = None
+        self.goal_world = None
+        self.get_logger().info(f"Path con {len(poses)} poses.")
 
 def main(args=None):
     rclpy.init(args=args)
